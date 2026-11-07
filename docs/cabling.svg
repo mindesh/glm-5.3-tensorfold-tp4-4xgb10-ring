@@ -1,0 +1,81 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 640" width="900" height="640" font-family="-apple-system, Segoe UI, Helvetica, Arial, sans-serif">
+  <style>
+    .bg { fill: #0d1117; }
+    .box { fill: #161b22; stroke: #3d444d; stroke-width: 1.5; }
+    .t { fill: #f0f6fc; }
+    .m { fill: #9198a1; }
+    .port { fill: #0d1117; stroke: #f0f6fc; stroke-width: 1.5; }
+    .none { stroke: #656c76; stroke-width: 1.5; stroke-dasharray: 6 6; fill: none; }
+  </style>
+  <rect class="bg" width="900" height="640" rx="12"/>
+
+  <!-- no link between opposite ranks -->
+  <path class="none" d="M300 190 L600 430 M600 190 L300 430"/>
+  <rect class="bg" x="372" y="292" width="156" height="36" rx="6"/>
+  <text class="m" x="450" y="307" font-size="13" text-anchor="middle">no cable between</text>
+  <text class="m" x="450" y="323" font-size="13" text-anchor="middle">opposite ranks</text>
+
+  <!-- cables -->
+  <g stroke-width="6" stroke-linecap="round">
+    <line x1="300" y1="125" x2="600" y2="125" stroke="#2f7ed8"/>
+    <line x1="720" y1="190" x2="720" y2="430" stroke="#e8743b"/>
+    <line x1="300" y1="495" x2="600" y2="495" stroke="#19a979"/>
+    <line x1="180" y1="190" x2="180" y2="430" stroke="#945ecf"/>
+  </g>
+
+  <!-- cable labels -->
+  <text x="450" y="100" font-size="15" font-weight="600" text-anchor="middle" fill="#2f7ed8">cable 1 · port 0 ↔ port 0</text>
+  <text class="m" x="450" y="152" font-size="13" text-anchor="middle">192.168.100.0/24 · 192.168.101.0/24</text>
+
+  <text x="705" y="290" font-size="15" font-weight="600" text-anchor="end" fill="#e8743b">cable 2</text>
+  <text class="m" x="705" y="308" font-size="13" text-anchor="end">port 1 ↔ port 1</text>
+  <text class="m" x="705" y="326" font-size="13" text-anchor="end">192.168.102.0/24</text>
+  <text class="m" x="705" y="344" font-size="13" text-anchor="end">192.168.103.0/24</text>
+
+  <text x="450" y="526" font-size="15" font-weight="600" text-anchor="middle" fill="#19a979">cable 3 · port 0 ↔ port 0</text>
+  <text class="m" x="450" y="478" font-size="13" text-anchor="middle">192.168.104.0/24 · 192.168.105.0/24</text>
+
+  <text x="195" y="290" font-size="15" font-weight="600" fill="#945ecf">cable 4</text>
+  <text class="m" x="195" y="308" font-size="13">port 1 ↔ port 1</text>
+  <text class="m" x="195" y="326" font-size="13">192.168.106.0/24</text>
+  <text class="m" x="195" y="344" font-size="13">192.168.107.0/24</text>
+
+  <!-- boxes -->
+  <g>
+    <rect class="box" x="60" y="60" width="240" height="130" rx="10"/>
+    <text class="t" x="80" y="94" font-size="20" font-weight="700">spark1</text>
+    <text class="m" x="80" y="118" font-size="14">rank 0 · API + rendezvous</text>
+    <text class="m" x="80" y="140" font-size="14">cable IPs .11</text>
+
+    <rect class="box" x="600" y="60" width="240" height="130" rx="10"/>
+    <text class="t" x="680" y="94" font-size="20" font-weight="700">spark2</text>
+    <text class="m" x="680" y="118" font-size="14">rank 1</text>
+    <text class="m" x="680" y="140" font-size="14">cable IPs .12</text>
+
+    <rect class="box" x="600" y="430" width="240" height="130" rx="10"/>
+    <text class="t" x="680" y="490" font-size="20" font-weight="700">spark3</text>
+    <text class="m" x="680" y="514" font-size="14">rank 2</text>
+    <text class="m" x="680" y="536" font-size="14">cable IPs .13</text>
+
+    <rect class="box" x="60" y="430" width="240" height="130" rx="10"/>
+    <text class="t" x="80" y="490" font-size="20" font-weight="700">spark4</text>
+    <text class="m" x="80" y="514" font-size="14">rank 3</text>
+    <text class="m" x="80" y="536" font-size="14">cable IPs .14</text>
+  </g>
+
+  <!-- ports -->
+  <g font-size="11" font-weight="700" text-anchor="middle">
+    <circle class="port" cx="300" cy="125" r="13"/><text class="t" x="300" y="129">P0</text>
+    <circle class="port" cx="180" cy="190" r="13"/><text class="t" x="180" y="194">P1</text>
+    <circle class="port" cx="600" cy="125" r="13"/><text class="t" x="600" y="129">P0</text>
+    <circle class="port" cx="720" cy="190" r="13"/><text class="t" x="720" y="194">P1</text>
+    <circle class="port" cx="720" cy="430" r="13"/><text class="t" x="720" y="434">P1</text>
+    <circle class="port" cx="600" cy="495" r="13"/><text class="t" x="600" y="499">P0</text>
+    <circle class="port" cx="180" cy="430" r="13"/><text class="t" x="180" y="434">P1</text>
+    <circle class="port" cx="300" cy="495" r="13"/><text class="t" x="300" y="499">P0</text>
+  </g>
+
+  <!-- footer -->
+  <text class="m" x="450" y="596" font-size="13" text-anchor="middle">P0 = enp1s0f0np0 + enP2p1s0f0np0 · P1 = enp1s0f1np1 + enP2p1s0f1np1 · one /24 per netdev · MTU 9000</text>
+  <text class="m" x="450" y="616" font-size="13" text-anchor="middle">address = 192.168.&lt;subnet&gt;.&lt;10 + box number&gt; · rendezvous over Tailscale, data over the cables</text>
+</svg>

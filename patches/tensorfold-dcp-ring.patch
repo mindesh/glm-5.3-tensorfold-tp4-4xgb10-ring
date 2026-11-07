@@ -1,0 +1,19 @@
+diff --git a/src/tensorfold/families/glm_moe_dsa/cuda/dcp.py b/src/tensorfold/families/glm_moe_dsa/cuda/dcp.py
+index cf3d72ab..bcb966e4 100644
+--- a/src/tensorfold/families/glm_moe_dsa/cuda/dcp.py
++++ b/src/tensorfold/families/glm_moe_dsa/cuda/dcp.py
+@@ -351,6 +351,11 @@ def attention(w, qa: torch.Tensor, qp: torch.Tensor, cache, pcache: torch.Tensor
+         w.comm.all_gather(send.view(-1), recv.view(-1))
+         combine(recv[:, rank], G * R * H * words, out, G)
+     else:                                                 # prompt chunks: each group to its owner
+-        recv = d.recv[:G * R * H * words].view(G, R, H, words)
+-        w.comm.grouped([(send[g], g) for g in range(G)], [(recv[g], g) for g in range(G)])
+-        combine(recv, R * H * words, out, G)
++        # switchless ring (no cable between opposite ranks), so no grouped send/recv to every peer: all-gather
++        # row slices that fit d.recv and read our group, as decode windows do (more bytes, same bits)
++        step = max(1, d.recv.numel() // (G * G * H * words))
++        for a in range(0, R, step):
++            n = min(step, R - a)
++            got = d.recv[:G * G * n * H * words]
++            w.comm.all_gather(send[:, a:a + n].contiguous().view(-1), got)
++            combine(got[rank * n * H * words:], G * n * H * words, out[a:a + n], G)

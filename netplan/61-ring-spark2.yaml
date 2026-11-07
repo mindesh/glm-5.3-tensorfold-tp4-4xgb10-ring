@@ -1,0 +1,9 @@
+# /etc/netplan/61-ring.yaml on spark2 (rank 1). Cable ports only; keep your management/Wi-Fi config as it is.
+# Each 200G port shows up as two netdevs (enp1s0f* and enP2p1s0f*); each netdev gets its own /24.
+network:
+  version: 2
+  ethernets:
+    enp1s0f0np0:   {addresses: [192.168.100.12/24], mtu: 9000}   # port 0 -> spark1
+    enP2p1s0f0np0: {addresses: [192.168.101.12/24], mtu: 9000}   # port 0 -> spark1
+    enp1s0f1np1:   {addresses: [192.168.102.12/24], mtu: 9000}   # port 1 -> spark3
+    enP2p1s0f1np1: {addresses: [192.168.103.12/24], mtu: 9000}   # port 1 -> spark3
