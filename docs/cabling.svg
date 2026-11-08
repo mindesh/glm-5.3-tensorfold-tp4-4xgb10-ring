@@ -77,5 +77,5 @@
 
   <!-- footer -->
   <text class="m" x="450" y="596" font-size="13" text-anchor="middle">P0 = enp1s0f0np0 + enP2p1s0f0np0 · P1 = enp1s0f1np1 + enP2p1s0f1np1 · one /24 per netdev · MTU 9000</text>
-  <text class="m" x="450" y="616" font-size="13" text-anchor="middle">address = 192.168.&lt;subnet&gt;.&lt;10 + box number&gt; · control and data over the cables</text>
+  <text class="m" x="450" y="616" font-size="13" text-anchor="middle">address = 192.168.&lt;subnet&gt;.&lt;10 + box number&gt; · rendezvous over Tailscale, data over the cables</text>
 </svg>
