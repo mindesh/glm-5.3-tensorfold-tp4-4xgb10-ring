@@ -263,11 +263,32 @@ TF_GLM_KV=q5 TF_GLM_EMBED_SPLIT=1 TF_GLM_MTP_REUSE=2 \
 ```
 
 **~500K shared by 2 streams** (e.g. an agent with 400K plus a chat with 100K). With `--parallel 2`, 524288 is refused.
-The engine's estimated maximum is 505,595 tokens, so we use 503808 (2048-aligned):
+The engine's estimated maximum is 505,595 tokens, so we use 503808 (2048-aligned). This is the setup the site runs day
+to day, with the larger q8 cache:
 
 ```bash
-TF_GLM_KV=q5 TF_GLM_EMBED_SPLIT=1 TF_GLM_MTP_REUSE=2 TF_GLM_EXTENTS=1 \
+TF_GLM_KV=q8 TF_GLM_EMBED_SPLIT=1 TF_GLM_MTP_REUSE=2 TF_GLM_EXTENTS=1 \
   bash scripts/tp4_start.sh 503808 "--mtp-drafts 3 --parallel 2"
+```
+
+Measured with q8: start estimate 110.09 GiB within a 112.23 GiB budget per rank, loaded in 216 s, 6.1–6.3 GiB left
+free per box. Speed with q8 was not measured separately. `TF_GLM_KV=q5` uses about 27% less cache memory per token
+and also fits; the 2-stream column in the table below was measured with q5.
+
+**Memory reserve.** Each rank sizes its cache from free memory minus a reserve. The engine's default reserve is 10% of
+memory (about 12 GiB per box); `tfrun.sh` sets 3 GiB instead (`TENSORFOLD_MEMORY_RESERVE_GIB`). With the default, a
+503808 start with 2 streams was refused on the site once (the estimate fell to about 500.7K), and q8 doesn't fit
+(estimated).
+
+**Out-of-memory guard.** With only ~6 GiB left free, we run `earlyoom` on every node. It sends SIGTERM to the
+model's process when available memory drops to 1 GiB (SIGKILL at 0.5 GiB), ignoring swap (`-s 100`), before the box
+itself runs out:
+
+```bash
+sudo apt install earlyoom
+# /etc/default/earlyoom:
+EARLYOOM_ARGS="-M 1048576 -s 100 -r 3600 --prefer '(vllm|VLLM|python3|python)' --avoid '(systemd|sshd|dockerd|containerd|dbus-daemon|NetworkManager|tailscaled)'"
+sudo systemctl restart earlyoom
 ```
 
 **1M, context parallel over 4 ranks** (needs the patch):
@@ -322,7 +343,8 @@ All differences from the upstream scripts:
   - `TF_NCCL_GATHER=ring`;
   - the `NCCL_*` ring settings;
   - GID index 3;
-  - no `--rm`, so a crashed rank keeps its logs.
+  - no `--rm`, so a crashed rank keeps its logs;
+  - a 3 GiB memory reserve (`TENSORFOLD_MEMORY_RESERVE_GIB`) instead of the engine's 10%.
 - `tp4_start.sh`:
   - nodes in ring order;
   - master and socket interface on `ctl0`, routed over the cables (`ring-ctl/`);
@@ -337,7 +359,7 @@ All differences from the upstream scripts:
 
 All single runs with synthetic prompts and greedy decoding.
 
-| | 512K, 1 stream | ~500K, 2 streams | 1M, DCP4 + patch |
+| | 512K, 1 stream | ~500K, 2 streams (q5) | 1M, DCP4 + patch |
 |---|---|---|---|
 | Startup estimate per rank | 102.55 GiB | n/a | 96.27 GiB |
 | Load time | 192–260 s | 211 s | 182 s |
