@@ -241,7 +241,8 @@ It checks, on every node:
 - the cable ports are up at MTU 9000;
 - GID 3 is an IPv4 RoCE v2 GID;
 - your user can run `docker`;
-- the switchless NCCL, weights, image, TensorFold commit, ring patch and ring `tfrun.sh` are present.
+- the switchless NCCL, weights, image, TensorFold commit, ring patch and ring `tfrun.sh` are present;
+- the three `ctl0` routes exist and all four `ctl0` addresses answer a ping (the opposite one through a neighbour).
 
 Across nodes, it checks that every /24 sits on exactly two ports on neighbouring ranks, and that a 9000-byte
 no-fragment ping goes across every cable. Fix anything marked `FAIL` before starting.
