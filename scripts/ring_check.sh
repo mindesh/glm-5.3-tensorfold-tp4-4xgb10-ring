@@ -1,8 +1,8 @@
 #!/bin/bash
 # Read-only preflight for the ring. Run from the machine that runs tp4_start.sh (reads NODES/HCA/WORKDIR from it).
 # Checks per node: cabled ports up at MTU 9000, GID 3 = RoCE v2 IPv4 on every HCA used, switchless NCCL, weights,
-# image, TensorFold commit + ring patch. Then: every cable subnet on exactly two neighbouring nodes, and a
-# jumbo ping (no fragmentation) across every cable.
+# image, TensorFold commit + ring patch, ctl0 routes + ping to all four (ring-ctl/). Then: every cable subnet on
+# exactly two neighbouring nodes, and a jumbo ping (no fragmentation) across every cable.
 eval "$(sed -n -e '/^NODES=/p' -e '/^HCA=/p' -e '/^WORKDIR=/p' "$(dirname "$0")/tp4_start.sh")"
 fail=0; bad() { echo "FAIL $*"; fail=1; }
 ADDRS=""
@@ -22,7 +22,8 @@ for r in 0 1 2 3; do
     cd $WORKDIR 2>/dev/null && echo ok tf \$(git -C TensorFold rev-parse --short=8 HEAD 2>/dev/null) \
       \$(grep -c 'switchless ring' TensorFold/src/tensorfold/families/glm_moe_dsa/cuda/dcp.py 2>/dev/null) \
       \$([ -x tfrun.sh ] && grep -c switchless-nccl tfrun.sh)
-    ip -4 -o addr show tailscale0 2>/dev/null | awk '{print \"ok tailscale \" \$4}'
+    echo \"ok ctl0 routes \$(ip -4 route show root 10.77.0.0/24 | grep -v linkdown | grep -c ' via ')\"
+    echo \"ok ctl0 ping \$(for p in 11 12 13 14; do ping -c1 -W1 10.77.0.\$p >/dev/null 2>&1 && printf x || printf \" -\$p\"; done)\"
   ") || { bad "$n: ssh"; continue; }
   echo "== rank $r $n"
   while read -r k a b c d e; do case $k in
@@ -35,6 +36,8 @@ for r in 0 1 2 3; do
   grep -q '^ok weights' <<< "$out" || bad "$n: weights missing"
   grep -q '^ok docker' <<< "$out" || bad "$n: this user can't run docker (sudo usermod -aG docker \$USER, then log in again)"
   grep -q '^ok image' <<< "$out" || bad "$n: image missing"
+  grep -q '^ok ctl0 routes 3$' <<< "$out" || bad "$n: ctl0 routes missing or a cable is down (sudo systemctl reload-or-restart ring-ctl)"
+  grep -q '^ok ctl0 ping xxxx$' <<< "$out" || bad "$n: ctl0 ping: $(grep '^ok ctl0 ping' <<< "$out" | cut -d' ' -f4-) (- = no answer; README 3d)"
   grep -qE '^ok tf ddfad356 1 [1-9]' <<< "$out" || bad "$n: want TensorFold ddfad356 + ring patch + ring tfrun.sh in $WORKDIR"
 done
 # each /24 on exactly two nodes, and those two are ring neighbours
