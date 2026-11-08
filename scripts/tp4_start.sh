@@ -5,8 +5,8 @@
 #
 # Edit for your cluster:
 NODES=(spark1 spark2 spark3 spark4)          # ssh names, in RING order: rank r is cabled to r-1 and r+1, rank 0 first
-MASTER=100.64.0.11                           # rank 0's Tailscale IP (rendezvous + NCCL sockets go over Tailscale)
-IFNAME=tailscale0                            # NCCL socket interface
+MASTER=10.77.0.11                            # rank 0's ctl0 address (ring-ctl/): rendezvous, heartbeat, NCCL sockets
+IFNAME=ctl0                                  # NCCL socket interface (dummy, routed over the cables)
 # one RoCE device per cabled port, one per ring neighbour (names differ between GB10 units, check `ibv_devinfo`)
 HCA=(rocep1s0f0,rocep1s0f1 rocep1s0f0,rocep1s0f1 rocep1s0f0,rocep1s0f1 rocep1s0f0,rocep1s0f1)
 WORKDIR='~/glm53-tf'                         # holds TensorFold/ (branch glm-dsa-tp4, ring patch) and tfrun.sh on every node
@@ -19,6 +19,10 @@ EXTRA=${2:---no-drafts}
 # Ring: the engine's RDMA gather and the prompt-chunk reduce both send to every peer, and opposite ranks have no
 # cable. TF_GLM_RDMA=0 keeps NCCL; TF_GLM_PROMPT_REDUCE=gather uses the all-gather path. Both required here.
 RING="TF_GLM_RDMA=0 TF_GLM_PROMPT_REDUCE=gather"
+# Switchless NCCL needs each rail's IPv4 RoCE v2 GID in slot 3 (a link flap can move it to 4), plus the ctl0 routes
+for n in 0 1 2 3; do
+  ssh -o BatchMode=yes -n "${NODES[$n]}" 'for d in rocep1s0f0 rocep1s0f1; do p=/sys/class/infiniband/$d/ports/1; grep -q "RoCE v2" $p/gid_attrs/types/3 && grep -q "^0000:0000:0000:0000:0000:ffff:c0a8:" $p/gids/3 || { echo "$(hostname) $d: IPv4 RoCE GID not in slot 3; fix: sudo nmcli connection up netplan-$(ls /sys/class/infiniband/$d/device/net)"; exit 1; }; done; [ "$(ip route | grep -c "^10\.77")" = 3 ] || { echo "$(hostname): ctl0 routes missing; fix: sudo systemctl reload ring-ctl"; exit 1; }' >&2 || exit 1
+done
 # Stop every rank's old lane first and let the nodes take the memory back: each rank's startup admission sizes the
 # cache from free memory, and a just-stopped lane still holding some of it costs ~10K tokens of window.
 for n in 0 1 2 3; do ssh -o BatchMode=yes -n "${NODES[$n]}" 'docker rm -f tf-tp4 >/dev/null 2>&1'; done

@@ -1,0 +1,4 @@
+#!/bin/sh
+# NetworkManager drops the ctl0 control routes when a QSFP link loses carrier (neighbour reboot); re-add on link up.
+case "$1" in enP2p1s0f0np0|enP2p1s0f1np1) [ "$2" = up ] && systemctl reload ring-ctl ;; esac
+exit 0

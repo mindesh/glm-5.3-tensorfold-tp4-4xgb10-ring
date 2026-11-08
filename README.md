@@ -12,16 +12,17 @@ recipe by BertholomusAI instead. This repo is that recipe adapted for the ring: 
 build, a small engine patch, launch scripts and a preflight check.
 
 Everything here was run on one site (3× DGX Spark + 1× ASUS GX10). Numbers are single runs, not a benchmark suite.
-Host names (`spark1`…`spark4`) and the Tailscale address in the scripts are placeholders; the cable subnets are the
-ones the site uses.
+Host names (`spark1`…`spark4`) and the control addresses (10.77.0.11–14) are placeholders. The cable /24 numbers are
+the site's; host octets and which cable gets which /24 follow the placeholder names.
 
 ## What you need
 
 - 4× GB10 (128 GB unified memory each), DGX OS / Ubuntu with Docker and the NVIDIA container runtime (stock on DGX OS).
   Mixed Spark / GX10 works.
 - 4× QSFP direct-attach cables (the ones you would use Spark-to-Spark). Each box uses both of its 200G ports.
-- A management network all four can reach each other on. This setup uses **Tailscale** (`tailscale0`) for rendezvous
-  and NCCL's socket bootstrap; bulk data goes over the cables.
+- A management network for ssh and for reaching the API. This setup uses **Tailscale**. Rendezvous, the engine's
+  heartbeat and NCCL's socket bootstrap do **not** use it: they go over the cables on a small control interface
+  (`ctl0`, section 3d).
 - A controller (laptop or one of the nodes) whose ssh key is authorized on all four, so `ssh spark1` etc. log in
   without a password, plus an ssh agent holding that key. The nodes don't need keys for each other: the copy step
   runs with your agent forwarded (`ssh -A`).
@@ -30,9 +31,10 @@ ones the site uses.
 - ~300 GB free on every node for the weights.
 - The GPUs otherwise idle. Each rank sizes its cache from free memory at startup, so another model or container
   left running shrinks the window or makes the start fail.
-- A firewall that allows the ranks to reach each other over Tailscale: TCP 29661 to rank 0 for rendezvous, plus
-  NCCL's bootstrap sockets on `tailscale0` (random ports). If `ufw` is active, `sudo ufw allow in on tailscale0` on
-  every node is the simple way. The cable interfaces carry RoCE (UDP 4791) and the copy step's ssh.
+- A firewall that lets 10.77.0.0/24 reach 10.77.0.0/24 over the cables, incoming and forwarded: TCP 29661 to rank 0
+  for rendezvous, plus the heartbeat and NCCL's bootstrap sockets (random ports). Docker sets the FORWARD policy to
+  DROP, so `ring-ctl.sh` adds an accept rule for that /24 to `DOCKER-USER` (to `FORWARD` without Docker). If `ufw` is
+  active, allow the same /24 in and routed. The cable interfaces also carry RoCE (UDP 4791) and the copy step's ssh.
 
 ## 1. Cabling
 
@@ -101,7 +103,8 @@ If slot 3 is empty or IPv6, the address isn't up on that netdev yet; fix netplan
 slot, set `NCCL_IB_GID_INDEX` in `scripts/tfrun.sh`.
 
 Only the `rocep1s0f0` and `rocep1s0f1` devices (one per port) are passed to NCCL (`HCA=` in `scripts/tp4_start.sh`).
-The `enP2…` halves still need their own addresses so the subnets stay unique, but they carry no traffic here.
+The `enP2…` halves need their own addresses so the subnets stay unique. They carry the small control path
+(section 3d), never NCCL data.
 
 ## 3. Software
 
@@ -168,12 +171,63 @@ accepts that host's ssh key automatically.
 If you keep the NCCL build somewhere else, set `NCCL_SWITCHLESS_DIR` on that node, or edit the default in
 `scripts/tfrun.sh`.
 
+### 3d. Control path over the cables (every node)
+
+The ranks find each other through rank 0 (`--master`, TCP 29661), check each other with a heartbeat (TensorFold's
+`Watchdog`, 30 s timeout in `multi.py` at the pinned commit), and bootstrap NCCL over plain sockets. All of that runs
+on `ctl0`, a dummy interface with one fixed address per box (10.77.0.11 … 10.77.0.14), reached by static /32 routes
+over the `enP2…` halves. Opposite ranks have no cable, so their routes go one hop through a neighbour
+(0↔2 via rank 1, 1↔3 via rank 0). No switch, no extra cabling, and none of it goes over Wi-Fi or Tailscale.
+
+[`ring-ctl/`](ring-ctl/) holds three files:
+
+- `ring-ctl.sh`: adds or removes `ctl0`, the three routes and the forward rule, and turns on `net.ipv4.ip_forward`
+  (Docker already does). Edit the `case` at the top for your host names (`hostname` on each box) and IP plan.
+- `ring-ctl.service`: runs it at boot as a non-root dynamic user with only `CAP_NET_ADMIN` and `CAP_NET_RAW`. Only
+  `modprobe dummy` runs as root.
+- `90-ring-ctl`: a NetworkManager hook. When a neighbour reboots, its cable loses carrier and NetworkManager drops the
+  routes through it; the hook re-adds them when the link comes back.
+
+```bash
+cd ~/glm53-tf/ring/ring-ctl
+sudo install -m 755 ring-ctl.sh /usr/local/sbin/ring-ctl.sh
+sudo install -m 644 ring-ctl.service /etc/systemd/system/ring-ctl.service
+sudo install -m 755 90-ring-ctl /etc/NetworkManager/dispatcher.d/90-ring-ctl
+sudo systemctl daemon-reload && sudo systemctl enable --now ring-ctl
+ip route | grep '^10\.77'      # 3 routes
+```
+
+Once all four are done, `ping -c 2 10.77.0.13` from spark1 (the opposite rank) should answer through spark2.
+`sudo systemctl stop ring-ctl` removes `ctl0`, the routes and the forward rule; `sudo systemctl disable ring-ctl` keeps
+it off at boot.
+
+On the site, with these files: GLM loaded and served with rendezvous, heartbeat and NCCL bootstrap on `ctl0` and no
+rank-to-rank connections on `tailscale0`; after a box rebooted, the service brought `ctl0` and its routes back; after
+a neighbour rebooted, the hook brought the routes back.
+
+Known limits of these files (as run on the site):
+
+- The forward rule matches the control /24 on any interface, not only the cable ports.
+- With a host name that isn't in the `case`, the service fails and retries every 10 s until you fix it.
+- The `tp4_start.sh` check assumes the HCAs are `rocep1s0f0`/`rocep1s0f1` and the cable subnets are 192.168.x.x; edit
+  it if yours differ.
+- While a link is down, traffic for that peer's control address follows the default route instead of failing.
+- `up` stops at the first route whose cable is down, so the routes after it (even over the working cable) and the
+  forward rule wait too. At boot the service retries every 10 s until both cables are up; a hook reload just fails.
+- The hook is NetworkManager only. With systemd-networkd, run `sudo systemctl reload ring-ctl` after a neighbour
+  reboot.
+
+Security: the control ports have no authentication. The heartbeat and step links bind to the master address; the
+rendezvous store (torch `TCPStore`, TCP 29661 on rank 0) listens on every interface while the model runs (measured), so
+it is reachable from your LAN and from Tailscale too. Keep the nodes on a network you trust, or firewall TCP 29661 on
+rank 0 to the control /24.
+
 ## 4. Configure and check
 
 On the controller, clone this repo too and edit the top of [`scripts/tp4_start.sh`](scripts/tp4_start.sh):
 
 - `NODES`: ssh names **in ring order** (rank 0 first, then around the ring).
-- `MASTER`: rank 0's Tailscale IP (`tailscale ip -4` on rank 0).
+- `MASTER`: rank 0's `ctl0` address (10.77.0.11 with the plan above).
 - `HCA`: check names with `ibv_devinfo`. They were `rocep1s0f0,rocep1s0f1` on all four of our boxes.
 
 Then run the read-only preflight:
@@ -194,9 +248,11 @@ no-fragment ping goes across every cable. Fix anything marked `FAIL` before star
 
 ## 5. Start
 
-All commands run from the controller. `tp4_start.sh` starts the four ranks, then waits until rank 0 answers on
-`/v1/models` and prints `ready after N s`. Loading took 182–260 s in our runs. If a rank's container exits during
-loading, the script stops and tells you which rank's logs to read. It gives up after 900 s.
+All commands run from the controller. `tp4_start.sh` first checks on every node that GID 3 is still the IPv4 RoCE v2
+GID and that the three `ctl0` routes exist; if not, it stops before touching anything and prints the fix. Then it
+starts the four ranks and waits until rank 0 answers on `/v1/models` and prints `ready after N s`. Loading took
+182–260 s in our runs. If a rank's container exits during loading, the script stops and tells you which rank's logs
+to read. It gives up after 900 s.
 
 **512K, one stream (fastest single stream):**
 
@@ -243,6 +299,8 @@ after a reboot. The next `tp4_start.sh` also stops any old ranks first.
 
 | Symptom | Cause | Fix (where) |
 |---|---|---|
+| `NCCL error 5: invalid usage` at startup, after a cable or neighbour went down and came back | The IPv4 RoCE v2 GID moved from slot 3 to slot 4 | `sudo nmcli connection up netplan-<netdev>` on that port; `tp4_start.sh` checks for it |
+| A rank can't reach `10.77.0.11:29661` after a neighbour rebooted | NetworkManager dropped the `ctl0` routes when the link lost carrier | The `90-ring-ctl` hook re-adds them; by hand: `sudo systemctl reload ring-ctl` |
 | `ibv_modify_qp failed with 110 Connection timed out`; the remote GID is on a subnet the local port isn't cabled to | Stock NCCL tries to reach every rank directly | Switchless NCCL plus its ring settings (`tfrun.sh`) |
 | `NCCL error 2: unhandled system error` in `comm.barrier()` | Same as above | Same as above |
 | Same 110 timeout with switchless NCCL | Two cables share a subnet, so the wrong NIC is picked | A unique /24 per netdev and per cable (netplan) |
@@ -266,7 +324,8 @@ All differences from the upstream scripts:
   - no `--rm`, so a crashed rank keeps its logs.
 - `tp4_start.sh`:
   - nodes in ring order;
-  - master and socket interface on Tailscale;
+  - master and socket interface on `ctl0`, routed over the cables (`ring-ctl/`);
+  - checks the GID slot and the `ctl0` routes on every node before stopping anything;
   - one HCA per cabled port;
   - no `spcx`;
   - `TF_GLM_RDMA=0` and `TF_GLM_PROMPT_REDUCE=gather`;
@@ -301,7 +360,7 @@ all-gather travels around the ring instead of using direct RDMA writes.
 - More than one concurrent stream on the 1M setup.
 - Tool calling and streaming through this setup.
 - Long-run stability (days).
-- Any rendezvous network other than Tailscale.
+- Pulling Wi-Fi during a run. With the control path on `ctl0` it shouldn't matter, but we haven't tried it.
 - `distribute.sh` copying onto empty nodes. Our nodes were filled by hand; the script's `--dry` and
   `--check` modes were run against them, and `--check` found all four identical.
 
